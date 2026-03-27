@@ -6,7 +6,7 @@ An end-to-end Excel data analysis project focused on supply chain performance ac
 
 ## Dashboard Preview
 
-![Supply Chain Dashboard](final dashboard.png)
+![Supply Chain Dashboard](final_dashboard.png)
 
 ---
 
