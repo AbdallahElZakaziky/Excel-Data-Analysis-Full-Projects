@@ -1,0 +1,289 @@
+================================================================================
+  STUDENT DATASET — TRAINING GUIDE
+  Power Query Cleaning | Data Modeling | KPIs | Suggested Charts
+================================================================================
+
+--------------------------------------------------------------------------------
+DATASET STRUCTURE
+--------------------------------------------------------------------------------
+
+Fact Table:
+  Fact_Enrollments      — 3,000 rows, 18 columns
+
+Dimension Tables:
+  Dim_Department        — 10 departments
+  Dim_Faculty           — 5 faculties
+  Dim_Course            — 15 courses
+  Dim_Instructor        — 10 instructors
+  Dim_AcademicYear      — 5 academic years (2019-2020 to 2023-2024)
+
+Star Schema Relationships:
+  Fact_Enrollments[DepartmentID]   → Dim_Department[DepartmentID]
+  Fact_Enrollments[CourseID]       → Dim_Course[CourseID]
+  Fact_Enrollments[InstructorID]   → Dim_Instructor[InstructorID]
+  Fact_Enrollments[AcademicYearID] → Dim_AcademicYear[AcademicYearID]
+  Dim_Department[FacultyID]        → Dim_Faculty[FacultyID]
+  Dim_Course[DepartmentID]         → Dim_Department[DepartmentID]
+  Dim_Instructor[DepartmentID]     → Dim_Department[DepartmentID]
+
+--------------------------------------------------------------------------------
+DIRTY COLUMNS — WHAT IS WRONG AND WHERE
+--------------------------------------------------------------------------------
+
+Column             | Type of Issue
+-------------------|--------------------------------------------------------------
+ExamDate           | Mixed formats (YYYY-MM-DD, MM/DD/YYYY, DD-MM-YYYY),
+                   | text placeholders (N/A, TBD, #VALUE!), nulls — INTENTIONALLY DIRTY
+EnrollmentDate     | All clean and valid YYYY-MM-DD dates
+AttendancePct      | Values > 100, negative values, text (N/A, Absent, "110%")
+MidtermScore       | Nulls, out-of-range values (999, -10), text ("absent")
+FinalScore         | Small number of nulls only
+TotalGrade         | Derived — will be null wherever MidtermScore is dirty
+GradeLetter        | Inconsistent casing (A, a, A ), typos (Excellent, grad)
+StudentStatus      | Inconsistent values (Active/active/ACTIVE, Withdrawn/withdrawn)
+Gender             | Inconsistent (Male/male/M/MALE)
+Scholarship        | Mixed (Yes/yes/YES/Y/1)
+Nationality        | ~4% nulls
+
+Foreign Keys (CLEAN — no missing values):
+  DepartmentID, CourseID, InstructorID, AcademicYearID
+
+--------------------------------------------------------------------------------
+POWER QUERY — CLEANING & TRANSFORMATION STEPS
+(7 steps — medium difficulty)
+--------------------------------------------------------------------------------
+
+STEP 1 — Standardize GradeLetter
+  Transform: Replace all grade letter variants to a consistent set.
+  Approach: Use "Replace Values" or add a Custom Column with nested if statements.
+  Mapping:
+    "a", "A ", "Excellent"      → "A"
+    "b", "B+", "Good"           → "B"
+    "c", "C ", "Average"        → "C"
+    "d", "Pass"                 → "D"
+    "f", "Fail", "FAIL"         → "F"
+
+STEP 2 — Standardize StudentStatus
+  Transform: Trim whitespace, then convert to Title Case.
+  Approach: Transform > Format > Trim, then Format > Capitalize Each Word.
+  Then replace remaining non-standard values:
+    "grad", "graduate" → "Graduated"
+    "on leave"         → "On Leave"
+    "N/A"              → null
+
+STEP 3 — Standardize Gender
+  Transform: Replace all variants with "Male" or "Female".
+  Approach: Add Custom Column:
+    if Text.Lower([Gender]) = "male" or [Gender] = "M" or [Gender] = "m" then "Male"
+    else if Text.Lower([Gender]) = "female" or [Gender] = "F" or [Gender] = "f" then "Female"
+    else null
+
+STEP 4 — Standardize Scholarship
+  Transform: Normalize to "Yes" / "No".
+  Approach: Add Custom Column:
+    if [Scholarship] = "Yes" or Text.Upper([Scholarship]) = "YES"
+       or [Scholarship] = "Y" or [Scholarship] = "1" then "Yes"
+    else if [Scholarship] = "No" or Text.Upper([Scholarship]) = "NO"
+       or [Scholarship] = "N" or [Scholarship] = "0" then "No"
+    else null
+
+STEP 5 — Clean AttendancePct
+  Transform: Convert column to numeric, then replace out-of-range values with null.
+  Approach:
+    1. Change column type to Decimal Number (errors will appear on text values — replace errors with null)
+    2. Add Custom Column:
+       if [AttendancePct] >= 0 and [AttendancePct] <= 100 then [AttendancePct] else null
+
+STEP 6 — Clean MidtermScore
+  Transform: Similar to AttendancePct — convert to numeric, handle errors, remove out-of-range.
+  Approach:
+    1. Change column type to Decimal Number (text values become errors — replace with null)
+    2. Add Custom Column:
+       if [MidtermScore] >= 0 and [MidtermScore] <= 50 then [MidtermScore] else null
+
+STEP 7 — Flag ExamDate Issues (instead of cleaning — teach error flagging)
+  Transform: Add a column called ExamDate_Status that flags the quality of ExamDate.
+  Approach: Add Custom Column:
+    if [ExamDate] = null or [ExamDate] = "" or [ExamDate] = "N/A"
+       or [ExamDate] = "TBD" or [ExamDate] = "#VALUE!" or [ExamDate] = "exam date"
+    then "Invalid"
+    else "Valid"
+  Teaching Point: Students learn that not all dirty data can be auto-cleaned —
+  sometimes flagging is the right approach before involving the data owner.
+
+--------------------------------------------------------------------------------
+DATA MODEL — POWER PIVOT SETUP
+--------------------------------------------------------------------------------
+
+1. Load all 6 tables into Power Pivot via Power Query.
+2. Switch to Diagram View in Power Pivot.
+3. Create the following relationships (all Many-to-One from Fact to Dim):
+   - Fact_Enrollments[DepartmentID]   → Dim_Department[DepartmentID]
+   - Fact_Enrollments[CourseID]       → Dim_Course[CourseID]
+   - Fact_Enrollments[InstructorID]   → Dim_Instructor[InstructorID]
+   - Fact_Enrollments[AcademicYearID] → Dim_AcademicYear[AcademicYearID]
+4. Create bridge relationships for role-playing dims:
+   - Dim_Department[FacultyID]     → Dim_Faculty[FacultyID]
+   - Dim_Course[DepartmentID]      → Dim_Department[DepartmentID]
+   - Dim_Instructor[DepartmentID]  → Dim_Department[DepartmentID]
+
+--------------------------------------------------------------------------------
+8 KEY PERFORMANCE INDICATORS (DAX MEASURES — MEDIUM LEVEL)
+--------------------------------------------------------------------------------
+
+KPI 1 — Total Enrollments
+  What it measures: Total number of enrollment records.
+  DAX:
+    Total Enrollments = COUNTROWS(Fact_Enrollments)
+  Usage: High-level volume metric; slice by year, department, faculty.
+
+KPI 2 — Average Final Score
+  What it measures: Mean final exam score across all valid records.
+  DAX:
+    Avg Final Score = AVERAGEX(
+        FILTER(Fact_Enrollments, NOT(ISBLANK(Fact_Enrollments[FinalScore]))),
+        Fact_Enrollments[FinalScore]
+    )
+  Usage: Benchmark performance per course or instructor.
+
+KPI 3 — Pass Rate (%)
+  What it measures: Percentage of students who scored 50 or above in TotalGrade.
+  DAX:
+    Pass Rate % =
+        DIVIDE(
+            COUNTROWS(FILTER(Fact_Enrollments, Fact_Enrollments[TotalGrade] >= 50)),
+            COUNTROWS(FILTER(Fact_Enrollments, NOT(ISBLANK(Fact_Enrollments[TotalGrade])))),
+            0
+        )
+  Usage: Core academic quality KPI. Compare across departments and years.
+
+KPI 4 — Scholarship Rate (%)
+  What it measures: Proportion of enrolled students on scholarship.
+  DAX:
+    Scholarship Rate % =
+        DIVIDE(
+            COUNTROWS(FILTER(Fact_Enrollments, Fact_Enrollments[Scholarship] = "Yes")),
+            [Total Enrollments],
+            0
+        )
+  Usage: Financial aid tracking; can slice by faculty or nationality.
+
+KPI 5 — Average Attendance Rate (%)
+  What it measures: Mean attendance percentage across valid records.
+  DAX:
+    Avg Attendance % = AVERAGEX(
+        FILTER(Fact_Enrollments,
+               NOT(ISBLANK(Fact_Enrollments[AttendancePct]))
+               && Fact_Enrollments[AttendancePct] >= 0
+               && Fact_Enrollments[AttendancePct] <= 100),
+        Fact_Enrollments[AttendancePct]
+    )
+  Usage: Attendance vs. performance correlation analysis.
+
+KPI 6 — Withdrawal Rate (%)
+  What it measures: Percentage of students with status "Withdrawn".
+  DAX:
+    Withdrawal Rate % =
+        DIVIDE(
+            COUNTROWS(FILTER(Fact_Enrollments, Fact_Enrollments[StudentStatus] = "Withdrawn")),
+            [Total Enrollments],
+            0
+        )
+  Usage: Retention risk signal; high withdrawal in a department warrants investigation.
+
+KPI 7 — Grade Distribution — % of A Grades
+  What it measures: Share of records achieving an "A" grade letter.
+  DAX:
+    A Grade Rate % =
+        DIVIDE(
+            COUNTROWS(FILTER(Fact_Enrollments, Fact_Enrollments[GradeLetter] = "A")),
+            COUNTROWS(FILTER(Fact_Enrollments, NOT(ISBLANK(Fact_Enrollments[GradeLetter])))),
+            0
+        )
+  Teaching Point: Students can replicate this pattern for B, C, D, F to build a
+  full grade distribution table, then visualize as a stacked bar chart.
+
+KPI 8 — Year-over-Year Enrollment Growth (%)
+  What it measures: Change in total enrollments compared to the previous academic year.
+  DAX:
+    YoY Enrollment Growth % =
+        VAR CurrentYear = [Total Enrollments]
+        VAR PreviousYear =
+            CALCULATE(
+                [Total Enrollments],
+                FILTER(
+                    Dim_AcademicYear,
+                    Dim_AcademicYear[AcademicYearID] =
+                        MAX(Dim_AcademicYear[AcademicYearID]) - 1
+                )
+            )
+        RETURN
+            DIVIDE(CurrentYear - PreviousYear, PreviousYear, BLANK())
+  Usage: Trend analysis across years; surfaces growth or contraction per department.
+
+--------------------------------------------------------------------------------
+SUGGESTED CHARTS FOR DASHBOARD
+--------------------------------------------------------------------------------
+
+Chart 1 — Total Enrollments by Faculty (Bar Chart)
+  Fields: Dim_Faculty[FacultyName] | [Total Enrollments]
+  Purpose: Snapshot of institutional size by faculty.
+
+Chart 2 — Pass Rate by Department (Bar Chart, sorted descending)
+  Fields: Dim_Department[DepartmentName] | [Pass Rate %]
+  Purpose: Identify underperforming departments.
+
+Chart 3 — Average Final Score by Academic Year (Line Chart)
+  Fields: Dim_AcademicYear[AcademicYear] | [Avg Final Score]
+  Purpose: Performance trend over time.
+
+Chart 4 — Grade Distribution (Stacked Bar or Donut)
+  Fields: GradeLetter | Count of EnrollmentID
+  Purpose: Visual breakdown of student achievement bands.
+
+Chart 5 — Scholarship vs. Non-Scholarship Pass Rate (Clustered Bar)
+  Fields: Scholarship | [Pass Rate %]
+  Purpose: Compare academic outcomes by funding status.
+
+Chart 6 — Withdrawal Rate by Department (Bar Chart)
+  Fields: Dim_Department[DepartmentName] | [Withdrawal Rate %]
+  Purpose: Retention risk by department.
+
+Chart 7 — YoY Enrollment Growth by Department (Bar Chart with conditional coloring)
+  Fields: Dim_Department[DepartmentName] | [YoY Enrollment Growth %]
+  Purpose: Growth vs. decline segmentation across departments.
+
+Chart 8 — Attendance vs. Final Score (Scatter — for advanced students)
+  Fields: AttendancePct | FinalScore (per student)
+  Purpose: Correlation analysis between attendance and exam performance.
+
+--------------------------------------------------------------------------------
+TEACHING SEQUENCE RECOMMENDATION
+--------------------------------------------------------------------------------
+
+Session 1 — Data Familiarization
+  Open the file. Review all sheets. Identify dirty columns manually.
+  Discuss what "foreign key integrity" means by checking DepartmentID in both
+  Fact and Dim_Department.
+
+Session 2 — Power Query Cleaning
+  Work through Steps 1–7 above in sequence.
+  Emphasize: trimming, type conversion, replace errors, custom columns.
+
+Session 3 — Data Modeling in Power Pivot
+  Load cleaned tables. Build the star schema. Define relationships.
+  Discuss why Dim_Faculty connects via Dim_Department (snowflake branch).
+
+Session 4 — DAX Measures
+  Build KPIs 1–5 first (simpler). Then introduce KPI 6–8.
+  Emphasize DIVIDE() over "/" for safe division.
+  Introduce FILTER() and CALCULATE() pattern.
+
+Session 5 — Dashboard Design
+  Build PivotTables from the data model.
+  Create 4–5 charts. Add Slicers for AcademicYear, Faculty, Department.
+  Discuss layout, color consistency, and labeling best practices.
+
+================================================================================
+END OF GUIDE
+================================================================================
